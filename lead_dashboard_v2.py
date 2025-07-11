@@ -34,7 +34,7 @@ if tier1_file and tier2_file and dispo_file and sales_file:
     merged_df = pd.merge(leads_df, dispo_df, how="left", left_on="email", right_on="Primary Email Address")
 
     # Load sales data
-    sales_df = pd.read_excel(sales_file, sheet_name="Sheet1")
+    sales_df = pd.read_csv(sales_file)
     sales_df = sales_df.dropna(subset=["Customer"])
     sales_df["Customer"] = sales_df["Customer"].str.upper().str.strip()
 
