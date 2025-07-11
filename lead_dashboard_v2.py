@@ -43,4 +43,71 @@ if tier1_file and tier2_file and dispo_file and sales_file:
     sales_df["Customer"] = sales_df["Customer"].str.upper().str.strip()
 
     # Match Customer to merged leads
-    merged_df["Customer"] = (merged_df["first_name"_]()
+    merged_df["Customer"] = (merged_df["first_name"].fillna('') + " " + merged_df["last_name"].fillna('')).str.upper().str.strip()
+    final_df = pd.merge(merged_df, sales_df, how="left", on="Customer")
+    final_df["is_sold"] = final_df["Policy #"].notna()
+
+    # Optional filters
+    st.sidebar.subheader("🔍 Filter Data")
+    agent_filter = st.sidebar.selectbox("Filter by Agent", options=["All"] + sorted(final_df["Assigned To User"].dropna().unique().tolist()))
+    campaign_filter = st.sidebar.selectbox("Filter by Campaign", options=["All"] + sorted(final_df["campaign"].unique()))
+    zip_filter = st.sidebar.selectbox("Filter by ZIP Code", options=["All"] + sorted(final_df["zip_code"].dropna().unique().astype(str)))
+
+    filtered_df = final_df.copy()
+    if agent_filter != "All":
+        filtered_df = filtered_df[filtered_df["Assigned To User"] == agent_filter]
+    if campaign_filter != "All":
+        filtered_df = filtered_df[filtered_df["campaign"] == campaign_filter]
+    if zip_filter != "All":
+        filtered_df = filtered_df[filtered_df["zip_code"].astype(str) == zip_filter]
+
+    # --- Source Performance ---
+    st.header("📦 Source Performance")
+    source_perf = filtered_df.groupby(["source", "campaign"]).agg(
+        leads_purchased=("email", "count"),
+        leads_contacted=("Milestone", lambda x: x.notna().sum()),
+        leads_sold=("is_sold", "sum"),
+        total_premium=("Premium", "sum"),
+        total_cost=("cost", "sum")
+    ).reset_index()
+
+    source_perf["contact_rate"] = (source_perf["leads_contacted"] / source_perf["leads_purchased"]).round(2)
+    source_perf["close_rate"] = (source_perf["leads_sold"] / source_perf["leads_contacted"]).replace(np.inf, 0).round(2)
+    source_perf["cost_per_sale"] = (source_perf["total_cost"] / source_perf["leads_sold"]).replace(np.inf, 0).round(2)
+
+    st.dataframe(source_perf)
+    st.bar_chart(source_perf.set_index("campaign")[["leads_purchased", "leads_contacted", "leads_sold"]])
+    st.download_button("📤 Export Source Data", source_perf.to_csv(index=False).encode("utf-8"), "source_performance.csv", "text/csv")
+
+    # --- Agent Performance ---
+    st.header("🧑‍💼 Agent Performance")
+    agent_perf = filtered_df.groupby("Assigned To User").agg(
+        leads_assigned=("email", "count"),
+        leads_contacted=("Milestone", lambda x: x.notna().sum()),
+        policies_sold=("is_sold", "sum"),
+        total_premium=("Premium", "sum")
+    ).reset_index().rename(columns={"Assigned To User": "Agent"})
+
+    agent_perf["close_rate"] = (agent_perf["policies_sold"] / agent_perf["leads_contacted"]).replace(np.inf, 0).round(2)
+
+    st.dataframe(agent_perf)
+    st.bar_chart(agent_perf.set_index("Agent")[["total_premium"]])
+    st.download_button("📤 Export Agent Data", agent_perf.to_csv(index=False).encode("utf-8"), "agent_performance.csv", "text/csv")
+
+    # --- ZIP Code Performance ---
+    st.header("📍 ZIP Code Performance")
+    zip_perf = filtered_df.groupby("zip_code").agg(
+        leads_purchased=("email", "count"),
+        leads_contacted=("Milestone", lambda x: x.notna().sum()),
+        leads_sold=("is_sold", "sum"),
+        total_premium=("Premium", "sum")
+    ).reset_index()
+
+    zip_perf["conversion_rate"] = (zip_perf["leads_sold"] / zip_perf["leads_contacted"]).replace(np.inf, 0).round(2)
+
+    st.dataframe(zip_perf)
+    st.bar_chart(zip_perf.set_index("zip_code")[["conversion_rate"]])
+    st.download_button("📤 Export ZIP Data", zip_perf.to_csv(index=False).encode("utf-8"), "zip_performance.csv", "text/csv")
+
+else:
+    st.info("👈 Upload all required files to generate your dashboard.")
