@@ -4,7 +4,24 @@ import numpy as np
 import os
 import re
 
-st.set_page_config(page_title="📊 Lead Dashboard v5", layout="wide")
+st.set_page_config(page_title="📊 Lead Dashboard v6", layout="wide")
+st.markdown("""
+    <style>
+        .metric-card {
+            padding: 1.5rem;
+            border-radius: 12px;
+            background-color: #f9f9f9;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 2rem;
+        }
+        .metric-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("📈 Lead Marketing & Sales Dashboard")
 
 st.sidebar.header("📁 Upload Your Files")
@@ -94,21 +111,24 @@ if lead_files and sales_file:
     summary["Avg_Cost_Per_Lead"] = summary["Spend"] / summary["Total_Leads"]
 
     for _, row in summary.iterrows():
-        st.subheader(f"📦 {row['vendor']} - {row['campaign']}")
-        cols = st.columns(4)
-        cols[0].metric("Total Spend", f"${row['Spend']:.2f}")
-        cols[1].metric("Total Premium", f"${row['Premium_Sum']:.2f}")
-        cols[2].metric("Total Leads", int(row['Total_Leads']))
-        cols[3].metric("Avg Cost per Lead", f"${row['Avg_Cost_Per_Lead']:.2f}")
-
-        st.write("---")
-        kpi_cols = st.columns(5)
-        kpi_cols[0].metric("Policy Close Rate", f"{row['Policy_Close_Rate']:.2%}")
-        kpi_cols[1].metric("Lead Close Rate", f"{row['Lead_Close_Rate']:.2%}")
-        kpi_cols[2].metric("Item Close Rate", f"{row['Item_Close_Rate']:.2%}")
-        kpi_cols[3].metric("Spend to Earn", f"{row['Spend_to_Earn']:.2f}x")
-        kpi_cols[4].metric("Cost per Policy", f"${row['Cost_Per_Bind']:.2f}")
-        st.write("")
-
+        st.markdown(f"""
+            <div class="metric-card">
+            <div class="metric-title">📦 {row['vendor']} - {row['campaign']}</div>
+            <div style="display: flex; gap: 2rem;">
+                <div><strong>Total Spend</strong><br>${row['Spend']:.2f}</div>
+                <div><strong>Total Premium</strong><br>${row['Premium_Sum']:.2f}</div>
+                <div><strong>Total Leads</strong><br>{int(row['Total_Leads'])}</div>
+                <div><strong>Avg Cost per Lead</strong><br>${row['Avg_Cost_Per_Lead']:.2f}</div>
+            </div>
+            <hr style="margin:1rem 0;">
+            <div style="display: flex; gap: 2rem;">
+                <div><strong>Policy Close Rate</strong><br>{row['Policy_Close_Rate']:.2%}</div>
+                <div><strong>Lead Close Rate</strong><br>{row['Lead_Close_Rate']:.2%}</div>
+                <div><strong>Item Close Rate</strong><br>{row['Item_Close_Rate']:.2%}</div>
+                <div><strong>Spend to Earn</strong><br>{row['Spend_to_Earn']:.2f}x</div>
+                <div><strong>Cost per Policy</strong><br>${row['Cost_Per_Bind']:.2f}</div>
+            </div>
+            </div>
+        """, unsafe_allow_html=True)
 else:
     st.info("⬅️ Upload at least one lead CSV and the SALES DATA file to get started.")
