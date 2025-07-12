@@ -10,6 +10,7 @@ st.title("📈 Lead Marketing & Sales Dashboard")
 st.sidebar.header("📁 Upload Your Files")
 lead_files = st.sidebar.file_uploader("Upload Lead CSVs (Multiple Vendors)", accept_multiple_files=True, type="csv")
 sales_file = st.sidebar.file_uploader("Upload SALES DATA (CSV or Excel)", type=["csv", "xlsx"])
+dispo_file = st.sidebar.file_uploader("Upload Lead Dispositions (CSV)", type="csv")
 smart_manual_spend = st.sidebar.number_input("SmartFinancial Total Spend (Optional)", min_value=0.0, step=1.0)
 
 # Normalize each vendor lead file
@@ -48,6 +49,12 @@ if lead_files and sales_file:
         if count > 0:
             per_lead_cost = smart_manual_spend / count
             all_leads.loc[mask, "cost"] = per_lead_cost
+
+    # Load and merge dispositions if provided
+    if dispo_file:
+        dispo_df = pd.read_csv(dispo_file)
+        dispo_df["Primary Email Address"] = dispo_df["Primary Email Address"].str.lower().str.strip()
+        all_leads = pd.merge(all_leads, dispo_df, how="left", left_on="email", right_on="Primary Email Address")
 
     # Load sales file
     if sales_file.name.endswith(".csv"):
