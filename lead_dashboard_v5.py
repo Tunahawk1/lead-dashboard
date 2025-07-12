@@ -17,7 +17,12 @@ smart_manual_spend = st.sidebar.number_input("SmartFinancial Total Spend (Option
 def parse_lead_file(uploaded_file):
     filename = uploaded_file.name.replace(".csv", "")
     vendor, campaign = filename.split("_", 1)
-    df = pd.read_csv(uploaded_file)
+
+    try:
+        df = pd.read_csv(uploaded_file)
+    except pd.errors.EmptyDataError:
+        st.warning(f"⚠️ File '{uploaded_file.name}' is empty or invalid and was skipped.")
+        return None
 
     if vendor == "EQ":
         df = df.rename(columns={
@@ -40,7 +45,8 @@ def parse_lead_file(uploaded_file):
 
 if lead_files and sales_file:
     # Load and normalize all leads
-    all_leads = pd.concat([parse_lead_file(f) for f in lead_files if parse_lead_file(f) is not None], ignore_index=True)
+    parsed_leads = [parse_lead_file(f) for f in lead_files]
+    all_leads = pd.concat([df for df in parsed_leads if df is not None], ignore_index=True)
 
     # Apply SmartFinancial spend manually if provided
     if smart_manual_spend and smart_manual_spend > 0:
@@ -104,8 +110,4 @@ if lead_files and sales_file:
         kpi_cols[1].metric("Lead Close Rate", f"{row['Lead_Close_Rate']:.2%}")
         kpi_cols[2].metric("Item Close Rate", f"{row['Item_Close_Rate']:.2%}")
         kpi_cols[3].metric("Spend to Earn", f"{row['Spend_to_Earn']:.2f}x")
-        kpi_cols[4].metric("Cost per Policy", f"${row['Cost_Per_Bind']:.2f}")
-        st.write("")
-
-else:
-    st.info("⬅️ Upload at least one lead CSV and the SALES DATA file to get started.")
+        kpi_cols[4].metric("C
