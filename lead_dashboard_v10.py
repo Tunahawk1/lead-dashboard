@@ -25,13 +25,18 @@ smart_manual_spend = st.sidebar.number_input(
 # ── Helper: parse vendor lead files ─────────────────────────────────────────────
 def parse_lead_file(uploaded_file):
     filename = uploaded_file.name.rsplit(".", 1)[0]
-    vendor, campaign = filename.split("_", 1)
+    parts = filename.split("_", 1)
+    if len(parts) != 2:
+        st.warning(f"⚠️ Filename '{uploaded_file.name}' doesn't follow 'Vendor_Campaign.csv' format. Skipping.")
+        return None
+    vendor, campaign = parts
     try:
         df = pd.read_csv(uploaded_file)
     except pd.errors.EmptyDataError:
         st.warning(f"⚠️ File '{uploaded_file.name}' is empty or invalid and was skipped.")
         return None
 
+    # Standardize fields per vendor
     if vendor == "EQ":
         df = df.rename(columns={
             "email": "email",
@@ -102,12 +107,12 @@ def parse_sales_file(uploaded_file):
 
 # ── Main processing ──────────────────────────────────────────────────────────────
 if lead_files and sales_file:
-    # Combine and prepare leads
+    # Parse and combine leads
     parsed = [parse_lead_file(f) for f in lead_files]
     all_leads = pd.concat([df for df in parsed if df is not None], ignore_index=True)
 
-    # Apply manual SmartFinancial spend
-    if smart_manual_spend and smart_manual_spend > 0:
+    # SmartFinancial manual spend adjustment
+    if smart_manual_spend > 0:
         mask = all_leads["vendor"] == "SmartFinancial"
         count = mask.sum()
         if count > 0:
@@ -142,26 +147,24 @@ if lead_files and sales_file:
             how="left",
             suffixes=("", "_dispo")
         )
-        no_phone = merged["Milestone"].isna()
-        fallback = pd.merge(
-            all_leads[no_phone],
-            dispo_df,
-            on=["first_name", "last_name"],
-            how="left",
-            suffixes=("", "_dispo")
-        )
-        all_leads = pd.concat([merged[~no_phone], fallback], ignore_index=True)
+        if "Milestone" in merged.columns:
+            no_phone = merged["Milestone"].isna()
+            fallback = pd.merge(
+                all_leads[no_phone],
+                dispo_df,
+                on=["first_name", "last_name"],
+                how="left",
+                suffixes=("", "_dispo")
+            )
+            all_leads = pd.concat([merged[~no_phone], fallback], ignore_index=True)
+        else:
+            all_leads = merged
         st.success("✅ Dispositions matched by phone and name; return reasons excluded.")
 
     # Merge sales data
     sales_df = parse_sales_file(sales_file)
     if sales_df is not None:
-        all_leads = pd.merge(
-            all_leads,
-            sales_df,
-            on="email",
-            how="left"
-        )
+        all_leads = pd.merge(all_leads, sales_df, on="email", how="left")
         all_leads["Policy #"] = all_leads["Policy #"].fillna("")
         all_leads["Premium"] = all_leads["Premium"].fillna(0)
         all_leads["Items"] = all_leads["Items"].fillna(0)
@@ -175,6 +178,7 @@ if lead_files and sales_file:
         "📍 ZIP Breakdown"
     ])
 
+    # Tab 1: Source Performance
     with tab1:
         if "Milestone" in all_leads.columns:
             keywords = ["Contacted", "Quoted", "Not interested", "Xdate", "Sold"]
@@ -185,11 +189,24 @@ if lead_files and sales_file:
             all_leads["is_quoted"] = False
 
         if "Created Date" in all_leads.columns:
-            all_leads["Month"] = pd.to_datetime(all_leads["Created Date"], errors="coerce").dt.to_period("M")
+            all_leads["Month"] = all_leads["Created Date"].dt.to_period("M")
             months = sorted(all_leads["Month"].dropna().astype(str).unique().tolist())
             selected = st.selectbox("Filter by Month", ["All"] + months)
             if selected != "All":
                 all_leads = all_leads[all_leads["Month"].astype(str) == selected]
 
-        summary = all_leads.groupby
+        summary = all_leads.groupby(["vendor", "campaign"]).agg(
+            Distinct_Customers=("email", pd.Series.nunique),
+            Policies_Sold=("Policy #", pd.Series.nunique),
+            Premium_Sum=("Premium", "sum"),
+            Items_Sold=("Items", "sum"),
+            Total_Leads=("email", "nunique"),
+            Spend=("cost", "sum"),
+            Connects=("is_connected", "sum"),
+            Quotes=("is_quoted", "sum")
+        ).reset_index()
 
+        summary["Item_Close_Rate"] = summary["Items_Sold"] / summary["Total_Leads"]
+        summary["Lead_Close_Rate"] = summary["Distinct_Customers"] / summary["Total_Leads"]
+        summary["Policy_Close_Rate"] = summary["Policies_Sold"] / summary["Total_Leads"]
+        summary["Connect Rate"] = (summary["Connects"] / summary["Total_Leads"] * 100).round(1).astype(str) + "%"
