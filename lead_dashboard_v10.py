@@ -98,7 +98,6 @@ def parse_sales_file(uploaded_file):
 
     df["Premium"] = pd.to_numeric(df["Premium"], errors="coerce").fillna(0)
     df["Items"] = pd.to_numeric(df["Items"], errors="coerce").fillna(0)
-
     return df[["email", "Policy #", "Premium", "Items", "Customer", "Assigned To User"]]
 
 # ── Main processing ──────────────────────────────────────────────────────────────
@@ -192,35 +191,5 @@ if lead_files and sales_file:
             if selected != "All":
                 all_leads = all_leads[all_leads["Month"].astype(str) == selected]
 
-        summary = all_leads.groupby(["vendor", "campaign"]).agg(
-            Distinct_Customers=("email", pd.Series.nunique),
-            Policies_Sold=("Policy #", pd.Series.nunique),
-            Premium_Sum=("Premium", "sum"),
-            Items_Sold=("Items", "sum"),
-            Total_Leads=("email", "nunique"),
-            Spend=("cost", "sum"),
-            Connects=("is_connected", "sum"),
-            Quotes=("is_quoted", "sum")
-        ).reset_index()
+        summary = all_leads.groupby
 
-        summary["Item_Close_Rate"] = summary["Items_Sold"] / summary["Total_Leads"]
-        summary["Lead_Close_Rate"] = summary["Distinct_Customers"] / summary["Total_Leads"]
-        summary["Policy_Close_Rate"] = summary["Policies_Sold"] / summary["Total_Leads"]
-        summary["Connect Rate"] = (summary["Connects"] / summary["Total_Leads"] * 100).round(1).astype(str) + "%"
-        summary["Quote Rate"] = (summary["Quotes"] / summary["Total_Leads"] * 100).round(1).astype(str) + "%"
-        summary["Spend_to_Earn"] = summary["Premium_Sum"] / summary["Spend"]
-        summary["Cost_Per_Bind"] = summary["Spend"] / summary["Policies_Sold"]
-        summary["Cost_Per_Item"] = summary["Spend"] / summary["Items_Sold"]
-        summary["Avg_Cost_Per_Lead"] = summary["Spend"] / summary["Total_Leads"]
-
-        color_map = {
-            'EQ': '#2274A5',
-            'SmartFinancial': '#F75C03',
-            'QuoteWizard': '#F1C40F',
-            'EverQuote': '#D90368'
-        }
-
-        for _, row in summary.iterrows():
-            vendor_color = color_map.get(row['vendor'], '#00CC66')
-            st.markdown(f"""
-                <div class=\"metric-card\" style=\"border-left: 10px solid {vendor_color};\">\
