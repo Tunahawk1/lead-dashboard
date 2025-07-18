@@ -24,106 +24,77 @@ smart_manual_spend = st.sidebar.number_input(
 
 # ── Helper: parse vendor lead files ─────────────────────────────────────────────
 def parse_lead_file(uploaded_file):
-    filename = uploaded_file.name.rsplit('.', 1)[0]
-    # Determine vendor and campaign from filename
-    if '_' in filename:
-        parts = filename.split('_', 1)
-    elif '-' in filename:
-        parts = filename.split('-', 1)
-    elif ' ' in filename:
-        parts = filename.split(' ', 1)
+    name = uploaded_file.name.rsplit('.', 1)[0]
+    # split on first separator
+    for sep in ['_', '-', ' ']:
+        if sep in name:
+            vendor, campaign = name.split(sep, 1)
+            break
     else:
-        st.warning(f"⚠️ Filename '{uploaded_file.name}' doesn't follow 'vendor_separators_campaign' format. Skipping.")
+        st.warning(f"⚠️ Filename '{uploaded_file.name}' must be 'vendor_campaign'. Skipping.")
         return None
-    vendor, campaign = parts
 
     try:
         df = pd.read_csv(uploaded_file)
-    except pd.errors.EmptyDataError:
-        st.warning(f"⚠️ File '{uploaded_file.name}' is empty or invalid and was skipped.")
+    except Exception:
+        st.warning(f"⚠️ Could not read '{uploaded_file.name}'. Skipping.")
         return None
 
-    # Vendor-specific parsing
-    if vendor == 'EQ':
-        df = df.rename(columns={
-            'email': 'email',
-            'cost': 'cost',
-            'first_name': 'first_name',
-            'last_name': 'last_name',
-            'Phone': 'Phone'
-        })
-        df['email'] = df['email'].astype(str).str.lower().str.strip()
-        df['cost'] = df['cost'].apply(lambda x: x/100 if x>100 else x)
-        df['first_name'] = df['first_name'].astype(str)
-        df['last_name'] = df['last_name'].astype(str)
-        df['Phone'] = (
-            df['Phone'].astype(str)
-              .str.replace(r'\D', '', regex=True)
-              .str[-10:]
-        )
-    elif vendor == 'SmartFinancial':
-        df = df.rename(columns={
-            'Email': 'email',
-            'First Name': 'first_name',
-            'Last Name': 'last_name',
-            'Phone': 'Phone'
-        })
-        df['email'] = df['email'].astype(str).str.lower().str.strip()
+    df = df.copy()
+    # generic parsing for any vendor
+    cols = {c: c.strip() for c in df.columns}
+    df.rename(columns=cols, inplace=True)
+    # email
+    email_cols = [c for c in df.columns if c.lower() == 'email']
+    if email_cols:
+        df['email'] = df[email_cols[0]].astype(str).str.lower().str.strip()
+    else:
+        df['email'] = None
+    # cost
+    cost_cols = [c for c in df.columns if c.lower() == 'cost']
+    if cost_cols:
+        df['cost'] = pd.to_numeric(df[cost_cols[0]], errors='coerce').fillna(0)
+    else:
         df['cost'] = 0.0
-        df['first_name'] = df['first_name'].astype(str)
-        df['last_name'] = df['last_name'].astype(str)
+    # first/last name
+    fn = [c for c in df.columns if 'first' in c.lower()]
+    ln = [c for c in df.columns if 'last' in c.lower()]
+    df['first_name'] = df[fn[0]].astype(str) if fn else None
+    df['last_name'] = df[ln[0]].astype(str) if ln else None
+    # phone
+    ph = [c for c in df.columns if 'phone' in c.lower()]
+    if ph:
         df['Phone'] = (
-            df['Phone'].astype(str)
-              .str.replace(r'\D', '', regex=True)
-              .str[-10:]
+            df[ph[0]].astype(str)
+               .str.replace(r'\D', '', regex=True)
+               .str[-10:]
         )
     else:
-        # Generic parsing for other vendors
-        df.rename(columns={c: c.strip() for c in df.columns}, inplace=True)
-        # Email
-        email_cols = [c for c in df.columns if c.lower()=='email']
-        if email_cols:
-            df['email'] = df[email_cols[0]].astype(str).str.lower().str.strip()
-        else:
-            st.warning(f"⚠️ No 'email' column found in {uploaded_file.name}.")
-            df['email'] = None
-        # Cost
-        cost_cols = [c for c in df.columns if c.lower()=='cost']
-        if cost_cols:
-            df['cost'] = pd.to_numeric(df[cost_cols[0]], errors='coerce').fillna(0)
-        else:
-            df['cost'] = 0.0
-        # Names
-        first_cols = [c for c in df.columns if 'first' in c.lower()]
-        last_cols = [c for c in df.columns if 'last' in c.lower()]
-        df['first_name'] = df[first_cols[0]].astype(str) if first_cols else None
-        df['last_name'] = df[last_cols[0]].astype(str) if last_cols else None
-        # Phone
-        phone_cols = [c for c in df.columns if 'phone' in c.lower()]
-        if phone_cols:
-            df['Phone'] = (
-                df[phone_cols[0]].astype(str)
-                  .str.replace(r'\D', '', regex=True)
-                  .str[-10:]
-            )
-        else:
-            df['Phone'] = None
+        df['Phone'] = None
 
-    # Annotate vendor & campaign
+    # vendor adjustments
+    if vendor.lower() == 'eq':
+        # cost might be in cents
+        df['cost'] = df['cost'].apply(lambda x: x/100 if x>100 else x)
+    if vendor.lower().startswith('smartfinancial') and smart_manual_spend>0:
+        # override cost later
+        pass
+
+    # annotate
     df['vendor'] = vendor
     df['campaign'] = campaign
 
-    # Preserve Created Date and Zip if present
-    cols = ['vendor','campaign','email','first_name','last_name','cost','Phone']
+    # preserve Created Date, Zip
+    keep = ['vendor','campaign','email','first_name','last_name','cost','Phone']
     if 'Created Date' in df.columns:
         df['Created Date'] = pd.to_datetime(df['Created Date'], errors='coerce')
-        cols.append('Created Date')
-    if 'Zip' in df.columns or 'zip' in df.columns:
-        zip_col = 'Zip' if 'Zip' in df.columns else 'zip'
-        df['Zip'] = df[zip_col]
-        cols.append('Zip')
+        keep.append('Created Date')
+    zipc = [c for c in df.columns if c.lower()=='zip']
+    if zipc:
+        df['Zip'] = df[zipc[0]]
+        keep.append('Zip')
 
-    return df[cols]
+    return df[keep]
 
 # ── Helper: parse sales data ────────────────────────────────────────────────────
 def parse_sales_file(uploaded_file):
@@ -135,156 +106,152 @@ def parse_sales_file(uploaded_file):
     except Exception as e:
         st.warning(f"⚠️ Could not read sales file: {e}")
         return None
-
-    df.rename(columns={c:c.strip() for c in df.columns}, inplace=True)
-    if 'email' in df.columns:
-        df['email'] = df['email'].astype(str).str.lower().str.strip()
-    elif 'Email' in df.columns:
-        df['email'] = df['Email'].astype(str).str.lower().str.strip()
+    df = df.rename(columns={c:c.strip() for c in df.columns})
+    # email
+    em = [c for c in df.columns if c.lower()=='email']
+    if em:
+        df['email'] = df[em[0]].astype(str).str.lower().str.strip()
     else:
-        st.warning("⚠️ No 'email' column in sales data; merging will be incomplete.")
         df['email'] = None
-
-    for col in ['Policy #','Premium','Items','Customer','Assigned To User']:
-        if col not in df.columns:
-            df[col] = np.nan
-
+    # ensure cols
+    for c in ['Policy #','Premium','Items','Customer','Assigned To User']:
+        if c not in df.columns:
+            df[c] = np.nan
     df['Premium'] = pd.to_numeric(df['Premium'], errors='coerce').fillna(0)
     df['Items']   = pd.to_numeric(df['Items'], errors='coerce').fillna(0)
     return df[['email','Policy #','Premium','Items','Customer','Assigned To User']]
 
 # ── Main processing ──────────────────────────────────────────────────────────────
-if lead_files and sales_file:
-    # Parse and combine leads
-    parsed = [parse_lead_file(f) for f in lead_files]
-    valid_dfs = [df for df in parsed if df is not None]
-    if not valid_dfs:
-        st.warning("⚠️ No valid lead files parsed. Check filenames/formats.")
-        st.stop()
-    all_leads = pd.concat(valid_dfs, ignore_index=True)
+if not lead_files or not sales_file:
+    st.info('📌 Upload both lead files and sales data to populate dashboard.')
+    st.stop()
 
-    # SmartFinancial spend adjustment
-    if smart_manual_spend > 0:
-        mask = all_leads['vendor']=='SmartFinancial'
-        cnt = mask.sum()
-        if cnt>0:
-            all_leads.loc[mask,'cost'] = smart_manual_spend/cnt
+# parse leads
+dfs = [parse_lead_file(f) for f in lead_files]
+leads = pd.concat([d for d in dfs if d is not None], ignore_index=True)
+if leads.empty:
+    st.error('No valid lead files parsed. Check filenames.')
+    st.stop()
 
-    # Merge dispositions
-    if dispo_file:
-        dispo_df = pd.read_csv(dispo_file)
-        if 'Folders' in dispo_df.columns:
-            dispo_df = dispo_df[~dispo_df['Folders'].astype(str).str.contains('!')]
-        dispo_df['Phone'] = (
-            dispo_df['Phone'].astype(str)
-                      .str.replace(r'\D','',regex=True)
-                      .str[-10:]
+# apply manual SmartFinancial spend
+auto_mask = leads['vendor'].str.lower().str.startswith('smartfinancial')
+if smart_manual_spend>0 and auto_mask.sum()>0:
+    leads.loc[auto_mask,'cost'] = smart_manual_spend/auto_mask.sum()
+
+# dispositions merge if dispo_file provided
+if dispo_file:
+    dispo = pd.read_csv(dispofile:=dispo_file)
+    # drop return reasons if Folders col
+    if 'Folders' in dispo.columns:
+        dispo = dispo[~dispo['Folders'].astype(str).str.contains('!')]
+    # detect phone, names
+    phc = [c for c in dispo.columns if 'phone' in c.lower()]
+    fnc = [c for c in dispo.columns if 'first' in c.lower()]
+    lnc = [c for c in dispo.columns if 'last' in c.lower()]
+    if phc:
+        dispo['Phone'] = (
+            dispo[phc[0]].astype(str)
+                 .str.replace(r'\D','',regex=True)
+                 .str[-10:]
         )
-        dispo_df['first_name'] = dispo_df['first_name'].astype(str).str.upper().str.strip()
-        dispo_df['last_name']  = dispo_df['last_name'].astype(str).str.upper().str.strip()
-
-        all_leads['Phone']      = all_leads['Phone'].astype(str).str.replace(r'\D','',regex=True).str[-10:]
-        all_leads['first_name']= all_leads['first_name'].astype(str).str.upper().str.strip()
-        all_leads['last_name'] = all_leads['last_name'].astype(str).str.upper().str.strip()
-
-        merged = pd.merge(all_leads,dispo_df,on='Phone',how='left',suffixes=('','_dispo'))
-        if 'Milestone' in merged.columns:
-            no_ph = merged['Milestone'].isna()
-            fallback = pd.merge(
-                all_leads[no_ph],dispo_df,on=['first_name','last_name'],how='left',suffixes=('','_dispo')
-            )
-            all_leads = pd.concat([merged[~no_ph],fallback],ignore_index=True)
+    else:
+        st.warning("⚠️ No phone column in dispositions; skipping dispo merge.")
+        dispo = None
+    if dispo is not None:
+        if fnc: dispo['first_name']=dispo[fnc[0]].astype(str).str.upper().str.strip()
+        if lnc: dispo['last_name']=dispo[lnc[0]].astype(str).str.upper().str.strip()
+        # clean leads
+        leads['Phone']=leads['Phone'].astype(str).str.replace(r'\D','',regex=True).str[-10:]
+        leads['first_name']=leads['first_name'].astype(str).str.upper().str.strip()
+        leads['last_name']=leads['last_name'].astype(str).str.upper().str.strip()
+        # merge
+        m1 = pd.merge(leads, dispo, on='Phone', how='left', suffixes=('','_dispo'))
+        if 'Milestone' in m1.columns:
+            null_ph = m1['Milestone'].isna()
+            fb = pd.merge(leads[null_ph], dispo, on=['first_name','last_name'], how='left', suffixes=('','_dispo'))
+            leads = pd.concat([m1[~null_ph], fb], ignore_index=True)
         else:
-            all_leads = merged
-        st.success("✅ Dispositions matched; return reasons excluded.")
+            leads = m1
+        st.success('✅ Dispositions merged.')
 
-    # Merge sales data
-    sales_df = parse_sales_file(sales_file)
-    if sales_df is not None:
-        all_leads = pd.merge(all_leads,sales_df,on='email',how='left')
-        all_leads['Policy #'] = all_leads['Policy #'].fillna('')
-        all_leads['Premium']  = all_leads['Premium'].fillna(0)
-        all_leads['Items']    = all_leads['Items'].fillna(0)
-        all_leads['Customer'] = all_leads['Customer'].fillna('')
-        st.success("✅ Sales data merged.")
+# merge sales
+sales = parse_sales_file(sales_file)
+if sales is not None:
+    leads = leads.merge(sales, on='email', how='left')
+    leads['Policy #'] = leads['Policy #'].fillna('')
+    leads['Premium']  = leads['Premium'].fillna(0)
+    leads['Items']    = leads['Items'].fillna(0)
+    leads['Customer'] = leads['Customer'].fillna('')
+    st.success('✅ Sales data merged.')
 
-    # Tabs
-    tab1,tab2,tab3 = st.tabs(['📦 Source Performance','🧑 Agent Metrics','📍 ZIP Breakdown'])
+# ── Source Performance Tab ─────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(['📦 Source Performance','🧑 Agent Metrics','📍 ZIP Breakdown'])
+with tab1:
+    # flags
+    if 'Milestone' in leads.columns:
+        kws=['Contacted','Quoted','Not interested','Xdate','Sold']
+        leads['is_connected']=leads['Milestone'].isin(kws)
+        leads['is_quoted']=leads['Milestone']=='Quoted'
+    else:
+        leads['is_connected']=False; leads['is_quoted']=False
+    # month filter
+    if 'Created Date' in leads.columns:
+        leads['Month']=leads['Created Date'].dt.to_period('M')
+        months=sorted(leads['Month'].dropna().astype(str).unique())
+        sel=st.selectbox('Filter by Month',['All']+months)
+        if sel!='All': leads=leads[leads['Month'].astype(str)==sel]
+    # aggregate
+    df_sum=leads.groupby(['vendor','campaign']).agg(
+        Premium_Earned=('Premium','sum'),
+        Marketing_Spend=('cost','sum'),
+        Total_Leads=('email','nunique')
+    ).reset_index()
+    df_sum['Spend_to_Earn']=df_sum['Marketing_Spend'].apply(lambda x: np.nan)  # placeholder
+    for i,row in df_sum.iterrows():
+        if row.Marketing_Spend>0:
+            df_sum.at[i,'Spend_to_Earn']=row.Premium_Earned/row.Marketing_Spend
+    # render cards
+    for _, r in df_sum.iterrows():
+        st.subheader(f"{r.vendor} - {r.campaign}")
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("Premium Earned", f"${r.Premium_Earned:,.2f}")
+        c2.metric("Marketing Spend", f"${r.Marketing_Spend:,.2f}")
+        c3.metric("Spend to Earn", f"{r.Spend_to_Earn:.2f}")
+        c4.metric("Total Leads", f"{int(r.Total_Leads)}")
 
-    # Source Performance
-    with tab1:
-        if 'Milestone' in all_leads.columns:
-            kw = ['Contacted','Quoted','Not interested','Xdate','Sold']
-            all_leads['is_connected']=all_leads['Milestone'].isin(kw)
-            all_leads['is_quoted']=all_leads['Milestone']=='Quoted'
+# Agent Metrics Tab
+def agent_metrics():
+    df2=leads.copy()
+    if 'Assigned To User' in df2.columns:
+        # filter
+        campaigns=['All']+sorted(df2['campaign'].unique())
+        sel=st.selectbox('Campaign Filter',campaigns)
+        if sel!='All': df2=df2[df2['campaign']==sel]
+        # flags
+        if 'Milestone' in df2.columns:
+            df2['is_connected']=df2['Milestone'].isin(['Contacted','Quoted','Not interested','Xdate','Sold'])
+            df2['is_quoted']=df2['Milestone']=='Quoted'
         else:
-            all_leads['is_connected']=False
-            all_leads['is_quoted']=False
-
-        if 'Created Date' in all_leads.columns:
-            all_leads['Month'] = all_leads['Created Date'].dt.to_period('M')
-            mons = sorted(all_leads['Month'].dropna().astype(str).unique())
-            sel = st.selectbox('Filter by Month', ['All']+mons)
-            if sel!='All': all_leads=all_leads[all_leads['Month'].astype(str)==sel]
-
-        summary=all_leads.groupby(['vendor','campaign']).agg(
-            Distinct_Customers=('email',pd.Series.nunique),
-            Policies_Sold=('Policy #',pd.Series.nunique),
-            Premium_Sum=('Premium','sum'),
-            Items_Sold=('Items','sum'),
-            Total_Leads=('email','nunique'),
+            df2['is_connected']=False; df2['is_quoted']=False
+        agg=df2.groupby('Assigned To User').agg(
+            Leads=('email','nunique'),
+            Policies=('Policy #',pd.Series.nunique),
             Spend=('cost','sum'),
             Connects=('is_connected','sum'),
             Quotes=('is_quoted','sum')
         ).reset_index()
+        agg['Connect Rate']=(agg.Connects/agg.Leads*100).round(1).astype(str)+'%'
+        agg['Quote Rate']=(agg.Quotes/agg.Leads*100).round(1).astype(str)+'%'
+        agg['Cost Per Lead']=(agg.Spend/agg.Leads).round(2)
+        st.dataframe(agg)
+with tab2:
+    agent_metrics()
 
-        # Calculate rates/ratios
-        summary['CT'] = (summary['Connects']/summary['Total_Leads']*100).round(1).astype(str)+'%'
-        summary['QR'] = (summary['Quotes']/summary['Total_Leads']*100).round(1).astype(str)+'%'
-        summary['Avg_CPL']=summary['Spend']/summary['Total_Leads']
-        summary['Spend_to_Earn']=summary['Premium_Sum']/summary['Spend']
-        summary['Cost_per_Bind']=summary['Spend']/summary['Policies_Sold']
-
-        colors={'EQ':'#2274A5','SmartFinancial':'#F75C03','QuoteWizard':'#F1C40F','EverQuote':'#D90368'}
-        for _,r in summary.iterrows():
-            col=colors.get(r['vendor'],'#00CC66')
-            st.markdown(f"""
-<div style=\"border-left:10px solid {col};padding:0.5rem;\">**{r['vendor']} - {r['campaign']}**  
-- Leads: {int(r['Total_Leads'])}  
-- Spend: ${r['Spend']:.2f}  
-- Avg CPL: ${r['Avg_CPL']:.2f}  
-- CT: {r['CT']}  QR: {r['QR']}  
-- Spend→Earn: {r['Spend_to_Earn']:.1f}x  
-- Cost/Bind: ${r['Cost_per_Bind']:.2f}
-</div>
-""",unsafe_allow_html=True)
-
-    # Agent Metrics
-    with tab2:
-        if 'Assigned To User' in all_leads.columns:
-            df2=all_leads.copy()
-            s=st.selectbox('Filter by Campaign',options=['All']+sorted(df2['campaign'].unique()))
-            if s!='All': df2=df2[df2['campaign']==s]
-            df2['is_connected']=df2['Milestone'].isin(['Contacted','Quoted','Not interested','Xdate','Sold']) if 'Milestone' in df2.columns else False
-            df2['is_quoted']=df2['Milestone']=='Quoted' if 'Milestone' in df2.columns else False
-            ag= df2.groupby('Assigned To User').agg(
-                Leads=('email','nunique'),Policies=('Policy #',pd.Series.nunique),
-                Premium=('Premium','sum'),Items=('Items','sum'),Spend=('cost','sum'),
-                Connects=('is_connected','sum'),Quotes=('is_quoted','sum')
-            ).reset_index()
-            ag['CT']=(ag['Connects']/ag['Leads']*100).round(1).astype(str)+'%'
-            ag['QR']=(ag['Quotes']/ag['Leads']*100).round(1).astype(str)+'%'
-            ag['CPL']=(ag['Spend']/ag['Leads']).round(2)
-            st.dataframe(ag.sort_values('Leads',ascending=False))
-
-    # ZIP Breakdown
-    with tab3:
-        zc=[c for c in all_leads.columns if c.lower()=='zip' or c.lower()=='zip_code']
-        if zc:
-            zb=all_leads.groupby(zc[0]).agg(Leads=('email','nunique'),Premium=('Premium','sum'),Spend=('cost','sum')).reset_index()
-            st.bar_chart(zb.set_index(zc[0])['Premium'])
-        else:
-            st.warning('No ZIP data found.')
-
-else:
-    st.info('📌 Upload both lead files and sales data to populate dashboard.')
+# ZIP Breakdown
+with tab3:
+    zc=[c for c in leads.columns if c.lower() in ('zip','zip_code')]
+    if zc:
+        zagg=leads.groupby(zc[0]).agg(Leads=('email','nunique'),Premium=('Premium','sum')).reset_index()
+        st.bar_chart(zagg.set_index(zc[0])['Premium'])
+    else:
+        st.warning('No ZIP data found.')
